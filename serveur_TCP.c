@@ -1,237 +1,150 @@
-/*  Application MIROIR  : cote serveur      */
-
+/* Gomoku 服务器 */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include "commun.h"
 
 #define BOARD_SIZE 15
 #define EMPTY 0
 #define BLACK 1
 #define WHITE 2
+#define PORT 12345
 
 typedef struct {
     int board[BOARD_SIZE][BOARD_SIZE];
-    int current_player;
-    int socket1;  // 黑方玩家
-    int socket2;  // 白方玩家
-    int black_score;  // 黑方得分
-    int white_score;  // 白方得分
+    int current_player, socket1, socket2, black_score, white_score;
+    int move_state, stone_count[2];
 } GameState;
 
 void init_board(GameState *game) {
     memset(game->board, EMPTY, sizeof(game->board));
     game->current_player = BLACK;
+    game->move_state = 0;
+    game->stone_count[0] = game->stone_count[1] = 0;
 }
 
-// 发送棋盘状态给两个玩家
-void send_board_state(GameState *game) {
+void send_board(GameState *game) {
     char buffer[1024];
-    int len = 0;
-    
-    // 格式: "BOARD [当前玩家] [棋盘数据] [黑方得分] [白方得分]"
-    len += sprintf(buffer + len, "BOARD %d ", game->current_player);
-    
-    for (int i = 0; i < BOARD_SIZE; i++) {
-        for (int j = 0; j < BOARD_SIZE; j++) {
+    int len = sprintf(buffer, "BOARD %d %d ", game->current_player, game->move_state);
+    for (int i = 0; i < BOARD_SIZE; i++)
+        for (int j = 0; j < BOARD_SIZE; j++)
             len += sprintf(buffer + len, "%d ", game->board[i][j]);
-        }
-    }
-    
     len += sprintf(buffer + len, "%d %d", game->black_score, game->white_score);
-    
     write(game->socket1, buffer, len);
     write(game->socket2, buffer, len);
 }
 
-// 处理投票
-int handle_voting(GameState *game, int winner) {
-    char buffer[256];
-    char votes[2] = {0};
-    
-    // 发送投票请求
+int check_win(GameState *game, int row, int col) {
+    int player = game->board[row][col], dirs[4][2] = {{1,0}, {0,1}, {1,1}, {1,-1}};
+    for (int d = 0; d < 4; d++) {
+        int count = 1, dx = dirs[d][0], dy = dirs[d][1];
+        for (int i = 1; i < 5; i++) {
+            int r = row + dx * i, c = col + dy * i;
+            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE || game->board[r][c] != player) break;
+            count++;
+        }
+        for (int i = 1; i < 5; i++) {
+            int r = row - dx * i, c = col - dy * i;
+            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE || game->board[r][c] != player) break;
+            count++;
+        }
+        if (count >= 5) return 1;
+    }
+    return 0;
+}
+
+int handle_voting(GameState *game) {
+    char buffer[64], votes[2];
     sprintf(buffer, "VOTE %d %d", game->black_score, game->white_score);
     write(game->socket1, buffer, strlen(buffer));
     write(game->socket2, buffer, strlen(buffer));
-    
-    // 收集投票
-    read(game->socket1, buffer, sizeof(buffer));
-    votes[0] = buffer[0];
-    read(game->socket2, buffer, sizeof(buffer));
-    votes[1] = buffer[0];
-    
-    // 如果两个玩家都同意继续
-    if(votes[0] == 'y' && votes[1] == 'y') {
-        // 更新得分
-        if(winner == BLACK)
-            game->black_score++;
-        else
-            game->white_score++;
-        return 1;
-    }
-    return 0;
+    read(game->socket1, votes, 1);
+    read(game->socket2, votes + 1, 1);
+    return votes[0] == 'y' && votes[1] == 'y';
 }
 
-int check_win(GameState *game, int row, int col) {
-    int player = game->board[row][col];
-    int directions[4][2] = {{1,0}, {0,1}, {1,1}, {1,-1}};
-    
-    for(int d = 0; d < 4; d++) {
-        int count = 1;
-        int dx = directions[d][0];
-        int dy = directions[d][1];
-        
-        // 检查正向
-        for(int i = 1; i < 5; i++) {
-            int new_row = row + dx * i;
-            int new_col = col + dy * i;
-            if(new_row < 0 || new_row >= BOARD_SIZE || new_col < 0 || new_col >= BOARD_SIZE)
-                break;
-            if(game->board[new_row][new_col] != player)
-                break;
-            count++;
-        }
-        
-        // 检查反向
-        for(int i = 1; i < 5; i++) {
-            int new_row = row - dx * i;
-            int new_col = col - dy * i;
-            if(new_row < 0 || new_row >= BOARD_SIZE || new_col < 0 || new_col >= BOARD_SIZE)
-                break;
-            if(game->board[new_row][new_col] != player)
-                break;
-            count++;
-        }
-        
-        if(count >= 5)
-            return 1;
-    }
-    return 0;
-}
+int main() {
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in serv_addr = {AF_INET, htons(PORT), INADDR_ANY};
+    bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+    listen(sockfd, 2);
+    printf("Waiting for players...\n");
 
-void handle_game(GameState *game) {
+    GameState game;
+    socklen_t clilen = sizeof(serv_addr);
+    game.socket1 = accept(sockfd, (struct sockaddr *)&serv_addr, &clilen);
+    write(game.socket1, "PLAYER 1", 8);
+    printf("Player 1 connected\n");
+    game.socket2 = accept(sockfd, (struct sockaddr *)&serv_addr, &clilen);
+    write(game.socket2, "PLAYER 2", 8);
+    printf("Player 2 connected\n");
+
+    init_board(&game);
+    send_board(&game);
+
     char buffer[256];
-    int current_socket;
-    
-    // 发送初始棋盘状态
-    send_board_state(game);
-    
-    while(1) {
-        // 确定当前玩家的socket
-        current_socket = (game->current_player == BLACK) ? game->socket1 : game->socket2;
-        
-        // 接收当前玩家的移动
-        memset(buffer, 0, sizeof(buffer));
-        int n = read(current_socket, buffer, sizeof(buffer));
-        
-        if (n <= 0) {
-            printf("Player disconnected\n");
-            break;
-        }
-        
-        int row, col;
-        if (sscanf(buffer, "MOVE %d %d", &row, &col) == 2) {
-            // 验证移动是否有效
-            if(row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE && 
-               game->board[row][col] == EMPTY) {
-                
-                // 更新棋盘
-                game->board[row][col] = game->current_player;
-                
-                // 检查是否获胜
-                if(check_win(game, row, col)) {
-                    char win_msg[32];
-                    sprintf(win_msg, "WIN %d", game->current_player);
-                    write(game->socket1, win_msg, strlen(win_msg));
-                    write(game->socket2, win_msg, strlen(win_msg));
-                    printf("Player %d wins!\n", game->current_player);
-                    
-                    // 处理投票
-                    if(handle_voting(game, game->current_player)) {
-                        // 重置棋盘开始新游戏
-                        init_board(game);
-                        send_board_state(game);
+    while (1) {
+        int sock = game.current_player == BLACK ? game.socket1 : game.socket2;
+        int n = read(sock, buffer, sizeof(buffer));
+        if (n <= 0) break;
+
+        int row, col, fr, fc;
+        if (sscanf(buffer, "MOVE %d %d", &row, &col) == 2 && game.move_state == 0) {
+            if (row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE && game.board[row][col] == EMPTY) {
+                game.board[row][col] = game.current_player;
+                game.stone_count[game.current_player - 1]++;
+                if (check_win(&game, row, col)) {
+                    send_board(&game); // 更新最后一个落子
+                    sprintf(buffer, "WIN %d", game.current_player);
+                    write(game.socket1, buffer, strlen(buffer));
+                    write(game.socket2, buffer, strlen(buffer));
+                    if (handle_voting(&game)) {
+                        game.black_score += game.current_player == BLACK;
+                        game.white_score += game.current_player == WHITE;
+                        init_board(&game);
+                        send_board(&game);
                         continue;
-                    } else {
-                        // 游戏结束
-                        char end_msg[64];
-                        sprintf(end_msg, "END %d %d", game->black_score, game->white_score);
-                        write(game->socket1, end_msg, strlen(end_msg));
-                        write(game->socket2, end_msg, strlen(end_msg));
-                        break;
                     }
+                    sprintf(buffer, "END %d %d", game.black_score, game.white_score);
+                    write(game.socket1, buffer, strlen(buffer));
+                    write(game.socket2, buffer, strlen(buffer));
+                    break;
                 }
-                
-                // 切换玩家
-                game->current_player = (game->current_player == BLACK) ? WHITE : BLACK;
-                
-                // 发送更新后的棋盘状态
-                send_board_state(game);
+                if (game.stone_count[0] >= 5 && game.stone_count[1] >= 5) game.move_state = 1;
+                game.current_player = game.current_player == BLACK ? WHITE : BLACK;
+                send_board(&game);
+            }
+        } else if (sscanf(buffer, "MOVE_FROM %d %d MOVE_TO %d %d", &fr, &fc, &row, &col) == 4 && game.move_state == 1) {
+            if (fr >= 0 && fr < BOARD_SIZE && fc >= 0 && fc < BOARD_SIZE && row >= 0 && row < BOARD_SIZE &&
+                col >= 0 && col < BOARD_SIZE && game.board[fr][fc] == game.current_player && game.board[row][col] == EMPTY) {
+                game.board[fr][fc] = EMPTY;
+                game.board[row][col] = game.current_player;
+                if (check_win(&game, row, col)) {
+                    send_board(&game);
+                    sprintf(buffer, "WIN %d", game.current_player);
+                    write(game.socket1, buffer, strlen(buffer));
+                    write(game.socket2, buffer, strlen(buffer));
+                    if (handle_voting(&game)) {
+                        game.black_score += game.current_player == BLACK;
+                        game.white_score += game.current_player == WHITE;
+                        init_board(&game);
+                        send_board(&game);
+                        continue;
+                    }
+                    sprintf(buffer, "END %d %d", game.black_score, game.white_score);
+                    write(game.socket1, buffer, strlen(buffer));
+                    write(game.socket2, buffer, strlen(buffer));
+                    break;
+                }
+                game.current_player = game.current_player == BLACK ? WHITE : BLACK;
+                send_board(&game);
             }
         }
     }
-}
-
-int main(int argc, char *argv[]) {
-    int sockfd, newsockfd1, newsockfd2;
-    struct sockaddr_in serv_addr, cli_addr;
-    socklen_t clilen = sizeof(cli_addr);
-    
-    // 创建socket
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
-        perror("Error creating socket");
-        exit(1);
-    }
-    
-    // 设置服务器地址结构
-    memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = INADDR_ANY;
-    serv_addr.sin_port = htons(PORT);
-    
-    // 绑定socket
-    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-        perror("Error binding socket");
-        exit(1);
-    }
-    
-    // 监听连接
-    listen(sockfd, 2);
-    printf("Waiting for players...\n");
-    
-    // 等待两个玩家连接
-    newsockfd1 = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
-    printf("Player 1 (BLACK) connected\n");
-    
-    // 发送玩家编号
-    write(newsockfd1, "PLAYER 1", 8);
-    
-    newsockfd2 = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
-    printf("Player 2 (WHITE) connected\n");
-    
-    // 发送玩家编号
-    write(newsockfd2, "PLAYER 2", 8);
-    
-    // 初始化游戏状态
-    GameState game;
-    init_board(&game);
-    game.socket1 = newsockfd1;
-    game.socket2 = newsockfd2;
-    game.black_score = 0;
-    game.white_score = 0;
-    
-    // 开始游戏
-    handle_game(&game);
-    
-    // 关闭连接
-    close(newsockfd1);
-    close(newsockfd2);
+    close(game.socket1);
+    close(game.socket2);
     close(sockfd);
-    
     return 0;
 }
