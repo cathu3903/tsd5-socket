@@ -344,6 +344,9 @@ int main(int argc, char *argv[]) {
                             textW, textH
                         };
                         
+                        // 先绘制棋盘
+                        draw_board(&ui);
+                        // 再绘制获胜消息
                         SDL_RenderCopy(ui.renderer, texture, NULL, &textRect);
                         SDL_RenderPresent(ui.renderer);
                         
@@ -358,6 +361,10 @@ int main(int argc, char *argv[]) {
             else if (strncmp(buffer, "VOTE", 4) == 0) {
                 int black_score, white_score;
                 sscanf(buffer + 5, "%d %d", &black_score, &white_score);
+                
+                // 更新分数
+                ui.black_score = black_score;
+                ui.white_score = white_score;
                 
                 // 确保最后一次落子被显示
                 draw_board(&ui);
@@ -375,8 +382,13 @@ int main(int argc, char *argv[]) {
                             (WINDOW_SIZE - surface->h) / 2,
                             surface->w, surface->h
                         };
+                        
+                        // 先绘制棋盘
+                        draw_board(&ui);
+                        // 再绘制投票提示
                         SDL_RenderCopy(ui.renderer, texture, NULL, &textRect);
                         SDL_RenderPresent(ui.renderer);
+                        
                         SDL_FreeSurface(surface);
                         SDL_DestroyTexture(texture);
                     }
@@ -396,6 +408,10 @@ int main(int argc, char *argv[]) {
                 int black_score, white_score;
                 sscanf(buffer + 4, "%d %d", &black_score, &white_score);
                 
+                // 更新分数
+                ui.black_score = black_score;
+                ui.white_score = white_score;
+                
                 // 确保最后一次落子被显示
                 draw_board(&ui);
                 
@@ -413,8 +429,13 @@ int main(int argc, char *argv[]) {
                             (WINDOW_SIZE - surface->h) / 2,
                             surface->w, surface->h
                         };
+                        
+                        // 先绘制棋盘
+                        draw_board(&ui);
+                        // 再绘制结束消息
                         SDL_RenderCopy(ui.renderer, texture, NULL, &textRect);
                         SDL_RenderPresent(ui.renderer);
+                        
                         SDL_FreeSurface(surface);
                         SDL_DestroyTexture(texture);
                     }
