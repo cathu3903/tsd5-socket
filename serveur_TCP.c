@@ -55,9 +55,9 @@ int check_win(GameState *game, int row, int col) {
     return 0;
 }
 
-int handle_voting(GameState *game) {
+int handle_voting(GameState *game, int winner) {
     char buffer[64], votes[2];
-    sprintf(buffer, "VOTE %d %d", game->black_score, game->white_score);
+    sprintf(buffer, "VOTE %d %d %d", game->black_score, game->white_score, winner);
     write(game->socket1, buffer, strlen(buffer));
     write(game->socket2, buffer, strlen(buffer));
     read(game->socket1, votes, 1);
@@ -96,11 +96,8 @@ int main() {
                 game.board[row][col] = game.current_player;
                 game.stone_count[game.current_player - 1]++;
                 if (check_win(&game, row, col)) {
-                    send_board(&game); // 更新最后一个落子
-                    sprintf(buffer, "WIN %d", game.current_player);
-                    write(game.socket1, buffer, strlen(buffer));
-                    write(game.socket2, buffer, strlen(buffer));
-                    if (handle_voting(&game)) {
+                    send_board(&game); // 显示最后一个落子
+                    if (handle_voting(&game, game.current_player)) {
                         game.black_score += game.current_player == BLACK;
                         game.white_score += game.current_player == WHITE;
                         init_board(&game);
@@ -123,10 +120,7 @@ int main() {
                 game.board[row][col] = game.current_player;
                 if (check_win(&game, row, col)) {
                     send_board(&game);
-                    sprintf(buffer, "WIN %d", game.current_player);
-                    write(game.socket1, buffer, strlen(buffer));
-                    write(game.socket2, buffer, strlen(buffer));
-                    if (handle_voting(&game)) {
+                    if (handle_voting(&game, game.current_player)) {
                         game.black_score += game.current_player == BLACK;
                         game.white_score += game.current_player == WHITE;
                         init_board(&game);

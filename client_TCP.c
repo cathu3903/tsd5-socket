@@ -41,7 +41,7 @@ int init_ui(GameUI *ui) {
     if (!ui->window) return 0;
     ui->renderer = SDL_CreateRenderer(ui->window, -1, SDL_RENDERER_ACCELERATED);
     if (!ui->renderer) return 0;
-    ui->font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18); // Linux 常用字体
+    ui->font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18);
     if (!ui->font) printf("Font not loaded\n");
     ui->move_state = 0;
     return 1;
@@ -69,8 +69,19 @@ void draw_board(GameUI *ui) {
     if (ui->font) {
         SDL_Color color = {0, 0, 0, 255};
         char text[64];
-        sprintf(text, "Player: %s | Scores: B%d W%d", ui->current_player == BLACK ? "Black" : "White", ui->black_score, ui->white_score);
+        // 显示当前轮到的玩家
+        sprintf(text, "Turn: %s", ui->current_player == BLACK ? "Black" : "White");
         SDL_Surface *surface = TTF_RenderText_Solid(ui->font, text, color);
+        if (surface) {
+            SDL_Texture *texture = SDL_CreateTextureFromSurface(ui->renderer, surface);
+            SDL_Rect rect = {10, 10, surface->w, surface->h}; // 放在棋盘顶部
+            SDL_RenderCopy(ui->renderer, texture, NULL, &rect);
+            SDL_FreeSurface(surface);
+            SDL_DestroyTexture(texture);
+        }
+        // 显示分数
+        sprintf(text, "Scores: Black %d, White %d", ui->black_score, ui->white_score);
+        surface = TTF_RenderText_Solid(ui->font, text, color);
         if (surface) {
             SDL_Texture *texture = SDL_CreateTextureFromSurface(ui->renderer, surface);
             SDL_Rect rect = {10, WINDOW_SIZE - 30, surface->w, surface->h};
@@ -143,15 +154,11 @@ int main(int argc, char *argv[]) {
                     }
                 sscanf(buffer + pos, "%d %d", &ui.black_score, &ui.white_score);
                 draw_board(&ui);
-            } else if (strncmp(buffer, "WIN", 3) == 0) {
-                int winner;
-                sscanf(buffer + 4, "%d", &winner);
-                draw_board(&ui); // 显示最后一个落子
-                printf("%s wins!\n", winner == BLACK ? "BLACK" : "WHITE");
-                SDL_Delay(2000);
             } else if (strncmp(buffer, "VOTE", 4) == 0) {
-                sscanf(buffer + 5, "%d %d", &ui.black_score, &ui.white_score);
+                int winner;
+                sscanf(buffer + 5, "%d %d %d", &ui.black_score, &ui.white_score, &winner);
                 draw_board(&ui);
+                if (winner) printf("%s wins!\n", winner == BLACK ? "BLACK" : "WHITE");
                 printf("Play again? (y/n): ");
                 char vote;
                 scanf(" %c", &vote);
