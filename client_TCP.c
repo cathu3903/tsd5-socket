@@ -1,131 +1,438 @@
 /*	Application MIROIR  : cote client		*/
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 #include "commun.h"
 
-void viderBuffer()
-{
-    int c = 0;
-    while (c != '\n' && c != EOF)
-    {
-        c = getchar();
-    }
+#define BOARD_SIZE 15
+#define EMPTY 0
+#define BLACK 1
+#define WHITE 2
+#define CELL_SIZE 40
+#define WINDOW_SIZE (BOARD_SIZE * CELL_SIZE + 100)
+
+typedef struct {
+    SDL_Window *window;
+    SDL_Renderer *renderer;
+    TTF_Font *font;
+    int board[BOARD_SIZE][BOARD_SIZE];
+    int current_player;
+    int my_player;  // 1 = Black, 2 = White
+    int black_score;
+    int white_score;
+} GameUI;
+
+void cleanup(GameUI *ui) {
+    if (ui->font) TTF_CloseFont(ui->font);
+    if (ui->renderer) SDL_DestroyRenderer(ui->renderer);
+    if (ui->window) SDL_DestroyWindow(ui->window);
+    TTF_Quit();
+    SDL_Quit();
 }
 
-int
-main (int argc, char **argv)
-{
+int init_ui(GameUI *ui) {
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        printf("SDL initialization failed: %s\n", SDL_GetError());
+        return 0;
+    }
 
-	/*---------------------------------------------- les variables */
+    if (TTF_Init() < 0) {
+        printf("TTF initialization failed: %s\n", TTF_GetError());
+        return 0;
+    }
 
-	/* pour le client */
-	int point_acces_client;	/* le point d'acc�s */
+    ui->window = SDL_CreateWindow("Gomoku",
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        WINDOW_SIZE, WINDOW_SIZE,
+        SDL_WINDOW_SHOWN);
+    if (!ui->window) {
+        printf("Window creation failed: %s\n", SDL_GetError());
+        return 0;
+    }
 
-	/* pour l'exp�dition */
-	struct hostent *adIP_serveur;	/* syst�me o� est le serveur */
-	struct sockaddr_in adTCP_serveur;	/* pour mettre l'adresse de son point d'acc�s */
+    ui->renderer = SDL_CreateRenderer(ui->window, -1, 
+        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!ui->renderer) {
+        printf("Renderer creation failed: %s\n", SDL_GetError());
+        return 0;
+    }
 
-	/* pour l'envoi  */
-	char envoyer[100];
-	int emis;
+    // Common font paths for macOS (English fonts)
+    const char* font_paths[] = {
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/Library/Fonts/Arial.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Supplemental/Courier New.ttf",
+        "/System/Library/Fonts/Times.ttc"
+    };
+    
+    ui->font = NULL;
+    for (size_t i = 0; i < sizeof(font_paths)/sizeof(font_paths[0]); i++) {
+        ui->font = TTF_OpenFont(font_paths[i], 18);
+        if (ui->font) break;
+    }
+    
+    if (!ui->font) {
+        printf("Warning: Could not load any font, text will not be displayed\n");
+    }
 
-	/* pour la r�ception  */
-	char recu[100];
-	int recus;
+    return 1;
+}
 
-	/* divers */
-	int retour;
-	char c;
+void draw_board(GameUI *ui) {
+    // Set background color
+    SDL_SetRenderDrawColor(ui->renderer, 222, 184, 135, 255);
+    SDL_RenderClear(ui->renderer);
 
-	/*---------------------------------------------- l'algorithme */
+    // Draw board lines
+    SDL_SetRenderDrawColor(ui->renderer, 0, 0, 0, 255);
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        // Horizontal lines
+        SDL_RenderDrawLine(ui->renderer,
+            50, 50 + i * CELL_SIZE,
+            50 + (BOARD_SIZE - 1) * CELL_SIZE, 50 + i * CELL_SIZE);
+        // Vertical lines
+        SDL_RenderDrawLine(ui->renderer,
+            50 + i * CELL_SIZE, 50,
+            50 + i * CELL_SIZE, 50 + (BOARD_SIZE - 1) * CELL_SIZE);
+    }
 
-	/* v�rification des arguments */
-	if (argc != 3)
-	{
-		printf ("Usage : %s nom_systeme port\n", argv[0]);
-		exit (-1);
-	}
-	/* r�cup�ration des adresses-IP du syst�me o� est le serveur */
-	if ((adIP_serveur = gethostbyname (argv[1])) == NULL)
-	{
-		herror("gethostbyname ");
-		exit (-1);
-	}
-	/* cr�ation d'un point d'acc�s */
-	point_acces_client = socket (PF_INET, SOCK_STREAM, 0);
-	if (point_acces_client < 0)
-	{
-		perror ("ERREUR-socket ");
-		exit (-1);
-	}
+    // Draw stones
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        for (int j = 0; j < BOARD_SIZE; j++) {
+            if (ui->board[i][j] != EMPTY) {
+                if (ui->board[i][j] == BLACK) {
+                    SDL_SetRenderDrawColor(ui->renderer, 0, 0, 0, 255);
+                } else {
+                    SDL_SetRenderDrawColor(ui->renderer, 255, 255, 255, 255);
+                }
+                
+                // Draw circular stone
+                int centerX = 50 + j * CELL_SIZE;
+                int centerY = 50 + i * CELL_SIZE;
+                int radius = CELL_SIZE/3;
+                
+                for (int y = -radius; y <= radius; y++) {
+                    for (int x = -radius; x <= radius; x++) {
+                        if (x*x + y*y <= radius*radius) {
+                            SDL_RenderDrawPoint(ui->renderer, centerX + x, centerY + y);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-	/* pr�paration de l'adresse destinataire (serveur) */
-	bzero (&adTCP_serveur, sizeof (adTCP_serveur));
-	adTCP_serveur.sin_family = AF_INET;
-	adTCP_serveur.sin_port = htons (atoi (argv[2]));
-	memcpy (&adTCP_serveur.sin_addr, adIP_serveur->h_addr, 4);
+    // Display current player, scores and my role
+    if (ui->font) {
+        SDL_Color textColor = {0, 0, 0, 255};
+        char text[128];
+        
+        // Display current player
+        sprintf(text, "Current Player: %s", ui->current_player == BLACK ? "Black" : "White");
+        SDL_Surface *surface = TTF_RenderText_Solid(ui->font, text, textColor);
+        if (surface) {
+            SDL_Texture *texture = SDL_CreateTextureFromSurface(ui->renderer, surface);
+            SDL_Rect textRect = {10, WINDOW_SIZE - 90, surface->w, surface->h};
+            SDL_RenderCopy(ui->renderer, texture, NULL, &textRect);
+            SDL_FreeSurface(surface);
+            SDL_DestroyTexture(texture);
+        }
+        
+        // Display scores
+        sprintf(text, "Scores - Black: %d, White: %d", ui->black_score, ui->white_score);
+        surface = TTF_RenderText_Solid(ui->font, text, textColor);
+        if (surface) {
+            SDL_Texture *texture = SDL_CreateTextureFromSurface(ui->renderer, surface);
+            SDL_Rect textRect = {10, WINDOW_SIZE - 60, surface->w, surface->h};
+            SDL_RenderCopy(ui->renderer, texture, NULL, &textRect);
+            SDL_FreeSurface(surface);
+            SDL_DestroyTexture(texture);
+        }
+        
+        // Display my role
+        sprintf(text, "I am: %s", ui->my_player == BLACK ? "Black" : "White");
+        surface = TTF_RenderText_Solid(ui->font, text, textColor);
+        if (surface) {
+            SDL_Texture *texture = SDL_CreateTextureFromSurface(ui->renderer, surface);
+            SDL_Rect textRect = {10, WINDOW_SIZE - 30, surface->w, surface->h};
+            SDL_RenderCopy(ui->renderer, texture, NULL, &textRect);
+            SDL_FreeSurface(surface);
+            SDL_DestroyTexture(texture);
+        }
+    }
 
-	/* connexion au serveur */
-	retour = connect (point_acces_client,
-			  (struct sockaddr *) &adTCP_serveur,
-			  sizeof (adTCP_serveur));
-	if (retour < 0)
-	{
-		perror ("ERREUR-connect ");
-		printf ("\n");
-		exit (-1);
-	}
-	printf ("CONNEXION etablie\n");
+    SDL_RenderPresent(ui->renderer);
+}
 
+int get_board_position(int pixel_pos) {
+    return (pixel_pos - 50 + CELL_SIZE/2) / CELL_SIZE;
+}
 
-	while(1)
-	{
-		/* lecture d'une ligne au clavier */
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s hostname\n", argv[0]);
+        exit(1);
+    }
 
+    GameUI ui = {0};
+    if (!init_ui(&ui)) {
+        cleanup(&ui);
+        return 1;
+    }
 
-		printf ("Que faut-il envoyer ? \n\t");
-		scanf("%99[^\n]",envoyer);
-		viderBuffer();
+    // Network connection
+    int sockfd;
+    struct sockaddr_in serv_addr;
+    struct hostent *server;
+    char buffer[1024];
 
-		if(envoyer[0] == 'q' && strlen(envoyer) == 1)
-			break;
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        perror("Error creating socket");
+        cleanup(&ui);
+        exit(1);
+    }
 
-		/* envoi du bloc d'octets */
-		emis = send (point_acces_client, envoyer, strlen (envoyer) + 1, 0);
-		if (emis < 0)
-		{
-			perror ("ERREUR-send ");
-			shutdown (point_acces_client, SHUT_RDWR);
-			close (point_acces_client);
-			exit (-1);
-		}
-		printf ("ENVOI de %d octets\n", emis);
+    server = gethostbyname(argv[1]);
+    if (server == NULL) {
+        fprintf(stderr, "Error, no such host\n");
+        cleanup(&ui);
+        exit(1);
+    }
 
-		/* r�ception de la r�ponse */
-		recus = recv (point_acces_client, recu, sizeof (recu), 0);
-		if (recus < 0)
-		{
-			perror ("ERREUR-recv ");
-			shutdown (point_acces_client, SHUT_RDWR);
-			close (point_acces_client);
-			exit (-1);
-		}
-		printf ("RECU  %d octets :", recus);
-		printf ("\t%s\n", recu);
-		printf("Want to continue?(y / n)\n");
-		//getchar();
-		scanf("%c", &c);
-		if(c == 'n')
-			break;
-		viderBuffer();
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    memcpy(&serv_addr.sin_addr.s_addr, server->h_addr, server->h_length);
+    serv_addr.sin_port = htons(PORT);
 
+    if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("Error connecting to server");
+        cleanup(&ui);
+        exit(1);
+    }
 
-		//while (getchar() != '\n');
-	}
+    printf("Connected to server. Waiting for other player...\n");
+    
+    // Receive player number
+    memset(buffer, 0, sizeof(buffer));
+    ssize_t bytes_read = read(sockfd, buffer, sizeof(buffer));
+    if (bytes_read <= 0) {
+        perror("Error reading from server");
+        cleanup(&ui);
+        close(sockfd);
+        exit(1);
+    }
+    
+    if (strncmp(buffer, "PLAYER 1", 8) == 0) {
+        ui.my_player = BLACK;
+        printf("You are Player 1 (BLACK)\n");
+    } else {
+        ui.my_player = WHITE;
+        printf("You are Player 2 (WHITE)\n");
+    }
 
-	/* fermeture du point d'acc�s */
-	shutdown (point_acces_client, SHUT_RDWR);
-	close (point_acces_client);
-	printf ("FIN DE CONNEXION\n\n");
+    // 初始化棋盘显示
+    memset(ui.board, EMPTY, sizeof(ui.board));
+    draw_board(&ui);
 
-	return (0);
+    SDL_Event event;
+    int running = 1;
+
+    while (running) {
+        // Handle SDL events
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_QUIT) {
+                running = 0;
+                break;
+            }
+            
+            // If it's my turn, handle mouse clicks
+            if (event.type == SDL_MOUSEBUTTONDOWN && ui.current_player == ui.my_player) {
+                int row = get_board_position(event.button.y);
+                int col = get_board_position(event.button.x);
+                
+                if (row >= 0 && row < BOARD_SIZE && 
+                    col >= 0 && col < BOARD_SIZE && 
+                    ui.board[row][col] == EMPTY) {
+                    
+                    // Send move to server
+                    memset(buffer, 0, sizeof(buffer));
+                    int len = snprintf(buffer, sizeof(buffer), "MOVE %d %d", row, col);
+                    if (write(sockfd, buffer, len) < 0) {
+                        perror("Error writing to server");
+                        running = 0;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Receive game state
+        fd_set readfds;
+        struct timeval tv;
+        FD_ZERO(&readfds);
+        FD_SET(sockfd, &readfds);
+        tv.tv_sec = 0;
+        tv.tv_usec = 10000; // 10ms timeout
+        
+        if (select(sockfd + 1, &readfds, NULL, NULL, &tv) > 0) {
+            memset(buffer, 0, sizeof(buffer));
+            ssize_t n = read(sockfd, buffer, sizeof(buffer));
+            
+            if (n <= 0) {
+                printf("Server disconnected\n");
+                break;
+            }
+            
+            if (strncmp(buffer, "BOARD", 5) == 0) {
+                // Parse board state
+                int pos = 6; // Skip "BOARD "
+                sscanf(buffer + pos, "%d", &ui.current_player);
+                
+                // Skip current player number
+                while (buffer[pos] != ' ' && pos < (int)n) pos++;
+                pos++; // Skip space
+                
+                // Parse board
+                for (int i = 0; i < BOARD_SIZE; i++) {
+                    for (int j = 0; j < BOARD_SIZE; j++) {
+                        sscanf(buffer + pos, "%d", &ui.board[i][j]);
+                        
+                        // Move to next number
+                        while (buffer[pos] != ' ' && pos < (int)n) pos++;
+                        pos++; // Skip space
+                    }
+                }
+                
+                // Parse scores
+                sscanf(buffer + pos, "%d %d", &ui.black_score, &ui.white_score);
+                
+                // Update display
+                draw_board(&ui);
+            }
+            else if (strncmp(buffer, "WIN", 3) == 0) {
+                int winner;
+                sscanf(buffer + 4, "%d", &winner);
+                
+                // 确保最后一次落子被显示
+                draw_board(&ui);
+                
+                // Display win message
+                char win_text[64];
+                sprintf(win_text, "%s wins!", winner == BLACK ? "Black" : "White");
+                
+                if (ui.font) {
+                    SDL_Color textColor = {255, 0, 0, 255};
+                    SDL_Surface *surface = TTF_RenderText_Solid(ui.font, win_text, textColor);
+                    if (surface) {
+                        SDL_Texture *texture = SDL_CreateTextureFromSurface(ui.renderer, surface);
+                        
+                        int textW = surface->w;
+                        int textH = surface->h;
+                        SDL_Rect textRect = {
+                            (WINDOW_SIZE - textW) / 2,
+                            (WINDOW_SIZE - textH) / 2,
+                            textW, textH
+                        };
+                        
+                        SDL_RenderCopy(ui.renderer, texture, NULL, &textRect);
+                        SDL_RenderPresent(ui.renderer);
+                        
+                        SDL_FreeSurface(surface);
+                        SDL_DestroyTexture(texture);
+                    }
+                }
+                
+                printf("%s wins!\n", winner == BLACK ? "BLACK" : "WHITE");
+                SDL_Delay(3000);  // Display for 3 seconds
+            }
+            else if (strncmp(buffer, "VOTE", 4) == 0) {
+                int black_score, white_score;
+                sscanf(buffer + 5, "%d %d", &black_score, &white_score);
+                
+                // 确保最后一次落子被显示
+                draw_board(&ui);
+                
+                // Display voting prompt
+                if (ui.font) {
+                    SDL_Color textColor = {0, 0, 0, 255};
+                    char text[128];
+                    sprintf(text, "Do you want to play again? (y/n)");
+                    SDL_Surface *surface = TTF_RenderText_Solid(ui.font, text, textColor);
+                    if (surface) {
+                        SDL_Texture *texture = SDL_CreateTextureFromSurface(ui.renderer, surface);
+                        SDL_Rect textRect = {
+                            (WINDOW_SIZE - surface->w) / 2,
+                            (WINDOW_SIZE - surface->h) / 2,
+                            surface->w, surface->h
+                        };
+                        SDL_RenderCopy(ui.renderer, texture, NULL, &textRect);
+                        SDL_RenderPresent(ui.renderer);
+                        SDL_FreeSurface(surface);
+                        SDL_DestroyTexture(texture);
+                    }
+                }
+                
+                // Get user input for voting
+                char vote;
+                printf("Do you want to play again? (y/n): ");
+                scanf(" %c", &vote);
+                
+                // Send vote to server
+                memset(buffer, 0, sizeof(buffer));
+                buffer[0] = vote;
+                write(sockfd, buffer, 1);
+            }
+            else if (strncmp(buffer, "END", 3) == 0) {
+                int black_score, white_score;
+                sscanf(buffer + 4, "%d %d", &black_score, &white_score);
+                
+                // 确保最后一次落子被显示
+                draw_board(&ui);
+                
+                // Display final scores
+                if (ui.font) {
+                    SDL_Color textColor = {0, 0, 0, 255};
+                    char text[128];
+                    sprintf(text, "Game ended. Final scores - Black: %d, White: %d", 
+                            black_score, white_score);
+                    SDL_Surface *surface = TTF_RenderText_Solid(ui.font, text, textColor);
+                    if (surface) {
+                        SDL_Texture *texture = SDL_CreateTextureFromSurface(ui.renderer, surface);
+                        SDL_Rect textRect = {
+                            (WINDOW_SIZE - surface->w) / 2,
+                            (WINDOW_SIZE - surface->h) / 2,
+                            surface->w, surface->h
+                        };
+                        SDL_RenderCopy(ui.renderer, texture, NULL, &textRect);
+                        SDL_RenderPresent(ui.renderer);
+                        SDL_FreeSurface(surface);
+                        SDL_DestroyTexture(texture);
+                    }
+                }
+                
+                printf("Game ended. Final scores - Black: %d, White: %d\n", 
+                       black_score, white_score);
+                SDL_Delay(3000);  // Display for 3 seconds
+                running = 0;
+            }
+        }
+        
+        // 强制更新显示
+        SDL_RenderPresent(ui.renderer);
+        SDL_Delay(10); // Reduce CPU usage
+    }
+
+    close(sockfd);
+    cleanup(&ui);
+    return 0;
 }
