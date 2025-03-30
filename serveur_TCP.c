@@ -23,6 +23,7 @@ void init_board(GameState *game) {
     game->current_player = BLACK;
     game->move_state = 0;
     game->stone_count[0] = game->stone_count[1] = 0;
+    game->black_score = game->white_score = 0;
 }
 
 void send_board(GameState *game) {
@@ -37,7 +38,9 @@ void send_board(GameState *game) {
 }
 
 int check_win(GameState *game, int row, int col) {
-    int player = game->board[row][col], dirs[4][2] = {{1,0}, {0,1}, {1,1}, {1,-1}};
+    int player = game->board[row][col];
+    if (player == EMPTY) return 0;
+    int dirs[4][2] = {{1,0}, {0,1}, {1,1}, {1,-1}};
     for (int d = 0; d < 4; d++) {
         int count = 1, dx = dirs[d][0], dy = dirs[d][1];
         for (int i = 1; i < 5; i++) {
@@ -60,9 +63,17 @@ int handle_voting(GameState *game, int winner) {
     sprintf(buffer, "VOTE %d %d %d", game->black_score, game->white_score, winner);
     write(game->socket1, buffer, strlen(buffer));
     write(game->socket2, buffer, strlen(buffer));
-    read(game->socket1, votes, 1);
-    read(game->socket2, votes + 1, 1);
+    int n1 = read(game->socket1, votes, 1);
+    int n2 = read(game->socket2, votes + 1, 1);
+    if (n1 <= 0 || n2 <= 0) return 0; // 如果客户端断开，默认不重玩
     return votes[0] == 'y' && votes[1] == 'y';
+}
+
+void end_game(GameState *game) {
+    char buffer[64];
+    sprintf(buffer, "END %d %d", game->black_score, game->white_score);
+    write(game->socket1, buffer, strlen(buffer));
+    write(game->socket2, buffer, strlen(buffer));
 }
 
 int main() {
@@ -87,30 +98,30 @@ int main() {
     char buffer[256];
     while (1) {
         int sock = game.current_player == BLACK ? game.socket1 : game.socket2;
-        int n = read(sock, buffer, sizeof(buffer));
+        int n = read(sock, buffer, sizeof(buffer) - 1);
         if (n <= 0) break;
+        buffer[n] = '\0'; // 确保字符串以空字符结尾
 
         int row, col, fr, fc;
         if (sscanf(buffer, "MOVE %d %d", &row, &col) == 2 && game.move_state == 0) {
             if (row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE && game.board[row][col] == EMPTY) {
                 game.board[row][col] = game.current_player;
                 game.stone_count[game.current_player - 1]++;
+                send_board(&game); // 更新棋盘状态
                 if (check_win(&game, row, col)) {
-                    send_board(&game); // 显示最后一个落子
+                    game.black_score += (game.current_player == BLACK);
+                    game.white_score += (game.current_player == WHITE);
+                    send_board(&game); // 显示胜利前的最终状态
                     if (handle_voting(&game, game.current_player)) {
-                        game.black_score += game.current_player == BLACK;
-                        game.white_score += game.current_player == WHITE;
                         init_board(&game);
                         send_board(&game);
                         continue;
                     }
-                    sprintf(buffer, "END %d %d", game.black_score, game.white_score);
-                    write(game.socket1, buffer, strlen(buffer));
-                    write(game.socket2, buffer, strlen(buffer));
+                    end_game(&game);
                     break;
                 }
                 if (game.stone_count[0] >= 5 && game.stone_count[1] >= 5) game.move_state = 1;
-                game.current_player = game.current_player == BLACK ? WHITE : BLACK;
+                game.current_player = (game.current_player == BLACK) ? WHITE : BLACK;
                 send_board(&game);
             }
         } else if (sscanf(buffer, "MOVE_FROM %d %d MOVE_TO %d %d", &fr, &fc, &row, &col) == 4 && game.move_state == 1) {
@@ -118,21 +129,20 @@ int main() {
                 col >= 0 && col < BOARD_SIZE && game.board[fr][fc] == game.current_player && game.board[row][col] == EMPTY) {
                 game.board[fr][fc] = EMPTY;
                 game.board[row][col] = game.current_player;
+                send_board(&game); // 更新棋盘状态
                 if (check_win(&game, row, col)) {
-                    send_board(&game);
+                    game.black_score += (game.current_player == BLACK);
+                    game.white_score += (game.current_player == WHITE);
+                    send_board(&game); // 显示胜利前的最终状态
                     if (handle_voting(&game, game.current_player)) {
-                        game.black_score += game.current_player == BLACK;
-                        game.white_score += game.current_player == WHITE;
                         init_board(&game);
                         send_board(&game);
                         continue;
                     }
-                    sprintf(buffer, "END %d %d", game.black_score, game.white_score);
-                    write(game.socket1, buffer, strlen(buffer));
-                    write(game.socket2, buffer, strlen(buffer));
+                    end_game(&game);
                     break;
                 }
-                game.current_player = game.current_player == BLACK ? WHITE : BLACK;
+                game.current_player = (game.current_player == BLACK) ? WHITE : BLACK;
                 send_board(&game);
             }
         }
