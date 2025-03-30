@@ -1,4 +1,3 @@
-/* Gomoku 服务器 (修改版，只支持下子) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
