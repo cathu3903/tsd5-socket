@@ -44,6 +44,7 @@ int init_ui(GameUI *ui) {
     ui->font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18);
     if (!ui->font) printf("Font not loaded\n");
     ui->move_state = 0;
+    ui->black_score = ui->white_score = 0;
     return 1;
 }
 
@@ -69,17 +70,15 @@ void draw_board(GameUI *ui) {
     if (ui->font) {
         SDL_Color color = {0, 0, 0, 255};
         char text[64];
-        // 显示当前轮到的玩家
         sprintf(text, "Turn: %s", ui->current_player == BLACK ? "Black" : "White");
         SDL_Surface *surface = TTF_RenderText_Solid(ui->font, text, color);
         if (surface) {
             SDL_Texture *texture = SDL_CreateTextureFromSurface(ui->renderer, surface);
-            SDL_Rect rect = {10, 10, surface->w, surface->h}; // 放在棋盘顶部
+            SDL_Rect rect = {10, 10, surface->w, surface->h};
             SDL_RenderCopy(ui->renderer, texture, NULL, &rect);
             SDL_FreeSurface(surface);
             SDL_DestroyTexture(texture);
         }
-        // 显示分数
         sprintf(text, "Scores: Black %d, White %d", ui->black_score, ui->white_score);
         surface = TTF_RenderText_Solid(ui->font, text, color);
         if (surface) {
@@ -140,8 +139,10 @@ int main(int argc, char *argv[]) {
         FD_ZERO(&fds); FD_SET(sockfd, &fds);
         if (select(sockfd + 1, &fds, NULL, NULL, &tv) > 0) {
             memset(buffer, 0, sizeof(buffer));
-            int n = read(sockfd, buffer, sizeof(buffer));
+            int n = read(sockfd, buffer, sizeof(buffer) - 1);
             if (n <= 0) { printf("Server disconnected\n"); break; }
+            buffer[n] = '\0'; // 确保字符串以空字符结尾
+
             if (strncmp(buffer, "BOARD", 5) == 0) {
                 int pos = 6;
                 sscanf(buffer + pos, "%d %d", &ui.current_player, &ui.move_state);
@@ -158,7 +159,24 @@ int main(int argc, char *argv[]) {
                 int winner;
                 sscanf(buffer + 5, "%d %d %d", &ui.black_score, &ui.white_score, &winner);
                 draw_board(&ui);
-                if (winner) printf("%s wins!\n", winner == BLACK ? "BLACK" : "WHITE");
+                if (winner) {
+                    printf("%s wins!\n", winner == BLACK ? "BLACK" : "WHITE");
+                    if (ui.font) {
+                        SDL_Color color = {255, 0, 0, 255};
+                        char text[64];
+                        sprintf(text, "%s wins!", winner == BLACK ? "Black" : "White");
+                        SDL_Surface *surface = TTF_RenderText_Solid(ui.font, text, color);
+                        if (surface) {
+                            SDL_Texture *texture = SDL_CreateTextureFromSurface(ui.renderer, surface);
+                            SDL_Rect rect = {(WINDOW_SIZE - surface->w) / 2, (WINDOW_SIZE - surface->h) / 2, surface->w, surface->h};
+                            SDL_RenderCopy(ui->renderer, texture, NULL, &rect);
+                            SDL_RenderPresent(ui->renderer);
+                            SDL_FreeSurface(surface);
+                            SDL_DestroyTexture(texture);
+                        }
+                    }
+                    SDL_Delay(2000);
+                }
                 printf("Play again? (y/n): ");
                 char vote;
                 scanf(" %c", &vote);
@@ -166,7 +184,7 @@ int main(int argc, char *argv[]) {
             } else if (strncmp(buffer, "END", 3) == 0) {
                 sscanf(buffer + 4, "%d %d", &ui.black_score, &ui.white_score);
                 draw_board(&ui);
-                printf("Game ended. Scores: B%d W%d\n", ui.black_score, ui.white_score);
+                printf("Game ended. Final Scores: Black %d, White %d\n", ui.black_score, ui.white_score);
                 SDL_Delay(2000);
                 running = 0;
             }
