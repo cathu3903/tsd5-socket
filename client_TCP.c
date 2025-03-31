@@ -76,29 +76,31 @@ void draw_board(GameUI *ui) {
     if (ui->font) {
         SDL_Color color = {0, 0, 0, 255};
         char text[64];
-        // 显示当前回合的玩家
-        // sprintf(text, "You are: %s", ui->my_player == BLACK ? "Black" : "White");
-        // 默认黑子先手，player 0先手，默认
+        // 显示当前回合的玩家,默认黑子先手，player 0
+        // Show the current turn, black player (number 0) is the first in default
         sprintf(text, "You are: %s", ui->my_player == BLACK ? "Black" : "White");
         SDL_Surface *surface = TTF_RenderText_Solid(ui->font, text, color);
         if (surface) {
             SDL_Texture *texture = SDL_CreateTextureFromSurface(ui->renderer, surface);
-            SDL_Rect rect = {WINDOW_SIZE - 150, 10, surface->w, surface->h}; // 放在棋盘顶部
+            // Show the text on the right top
+            SDL_Rect rect = {WINDOW_SIZE - 150, 10, surface->w, surface->h};
             SDL_RenderCopy(ui->renderer, texture, NULL, &rect);
             SDL_FreeSurface(surface);
             SDL_DestroyTexture(texture);
         }
         sprintf(text, "Turn: %s", ui->current_player == BLACK ? "Black" : "White");
-        // SDL_Surface *surface = TTF_RenderText_Solid(ui->font, text, color);
+
         surface = TTF_RenderText_Solid(ui->font, text, color);
         if (surface) {
             SDL_Texture *texture = SDL_CreateTextureFromSurface(ui->renderer, surface);
+            // Show the color of this player
             SDL_Rect rect = {10, 10, surface->w, surface->h}; // 放在棋盘顶部
             SDL_RenderCopy(ui->renderer, texture, NULL, &rect);
             SDL_FreeSurface(surface);
             SDL_DestroyTexture(texture);
         }
         // 显示分数
+
         sprintf(text, "Scores: Black %d, White %d", ui->black_score, ui->white_score);
         surface = TTF_RenderText_Solid(ui->font, text, color);
         if (surface) {
@@ -108,6 +110,8 @@ void draw_board(GameUI *ui) {
             SDL_FreeSurface(surface);
             SDL_DestroyTexture(texture);
         }
+
+
     }
     SDL_RenderPresent(ui->renderer);
 }
@@ -142,7 +146,7 @@ int main(int argc, char *argv[]) {
                 int row = get_pos(event.button.y), col = get_pos(event.button.x);
                 if (row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE) {
                     if (ui.move_state == 0 && ui.board[row][col] == EMPTY) {
-                        sprintf(buffer, "MOVE %d %d", row, col);
+                        sprintf(buffer, "MOVE %d %d\n", row, col);
                         write(sockfd, buffer, strlen(buffer));
 
                         printf("Sent MOVE %d %d\n", row, col);
@@ -150,7 +154,7 @@ int main(int argc, char *argv[]) {
                         ui.from_row = row; ui.from_col = col; ui.move_state = 2;
                         draw_board(&ui);
                     } else if (ui.move_state == 2 && ui.board[row][col] == EMPTY) {
-                        sprintf(buffer, "MOVE_FROM %d %d MOVE_TO %d %d", ui.from_row, ui.from_col, row, col);
+                        sprintf(buffer, "MOVE_FROM %d %d MOVE_TO %d %d\n", ui.from_row, ui.from_col, row, col);
                         write(sockfd, buffer, strlen(buffer));
 
                         printf("Sent MOVE_FROM_TO: %s\n", buffer);
@@ -166,18 +170,21 @@ int main(int argc, char *argv[]) {
         if (select(sockfd + 1, &fds, NULL, NULL, &tv) > 0) {
 
             memset(buffer, 0, sizeof(buffer));
-            int n = read(sockfd, buffer, sizeof(buffer) - 1);   // Read message from server
+            // Read message from server
+            int n = read(sockfd, buffer, sizeof(buffer) - 1);
             buffer[n] = '\0';
-
-            printf("Received message: %s\n", buffer);       // Print message
+            // Print received message
+            printf("Received message: %s\n", buffer);
 
             char * message = strtok(buffer, "\n");
 
             while( message != NULL)
             {
-                printf("Received message: %s\n", message);
-                // if (n <= 0) { printf("Server disconnected\n"); break; }     // Disconnected
-                if (strncmp(message, "BOARD", 5) == 0) {         //
+                if (n <= 0) { printf("Server disconnected\n"); break; }     // Disconnected
+
+                printf("Handling message: %s\n", message);
+                if (strncmp(message, "BOARD", 5) == 0) {
+                    // BOARD message, render new board and stones
                     printf("Received board %d times;\n", ++times);
                     int pos = 6;
                     sscanf(message + pos, "%d %d", &ui.current_player, &ui.move_state);
@@ -191,6 +198,7 @@ int main(int argc, char *argv[]) {
                     sscanf(message + pos, "%d %d", &ui.black_score, &ui.white_score);
                     draw_board(&ui);
                 } else if (strncmp(message, "VOTE", 4) == 0) {
+                    // VOTE message
                     printf("VOTE\n");
 
                     int winner;
@@ -207,47 +215,13 @@ int main(int argc, char *argv[]) {
 
                     sscanf(message + 4, "%d %d", &ui.black_score, &ui.white_score);
                     draw_board(&ui);
-                    printf("Game ended. Scores: B-%d W-%d\n", ui.black_score, ui.white_score);
+                    // printf("Game ended. Scores: B-%d W-%d\n", ui.black_score, ui.white_score);
                     SDL_Delay(2000);
                     running = 0;
                 }
 
                 message = strtok(NULL, "\n");               // Continue to process
             }
-            // if (n <= 0) { printf("Server disconnected\n"); break; }     // Disconnected
-            // if (strncmp(buffer, "BOARD", 5) == 0) {         //
-            //     printf("Received board %d times;\n", ++times);
-            //     int pos = 6;
-            //     sscanf(buffer + pos, "%d %d", &ui.current_player, &ui.move_state);
-            //     while (buffer[pos] != ' ' && pos < n) pos++; pos++;
-            //     while (buffer[pos] != ' ' && pos < n) pos++; pos++;
-            //     for (int i = 0; i < BOARD_SIZE; i++)
-            //         for (int j = 0; j < BOARD_SIZE; j++) {
-            //             sscanf(buffer + pos, "%d", &ui.board[i][j]);
-            //             while (buffer[pos] != ' ' && pos < n) pos++; pos++;
-            //         }
-            //     sscanf(buffer + pos, "%d %d", &ui.black_score, &ui.white_score);
-            //     draw_board(&ui);
-            // } else if (strncmp(buffer, "VOTE", 4) == 0) {
-            //     printf("VOTE\n");
-
-            //     int winner;
-            //     sscanf(buffer + 5, "%d %d %d", &ui.black_score, &ui.white_score, &winner);
-            //     draw_board(&ui);
-            //     if (winner) printf("%s wins!\n", winner == BLACK ? "BLACK" : "WHITE");
-            //     printf("Play again? (y/n): ");
-            //     char vote;
-            //     scanf(" %c", &vote);
-            //     write(sockfd, &vote, 1);
-            // } else if (strncmp(buffer, "END", 3) == 0) {
-            //     printf("Game ended\n");
-
-            //     sscanf(buffer + 4, "%d %d", &ui.black_score, &ui.white_score);
-            //     draw_board(&ui);
-            //     printf("Game ended. Scores: B%d W%d\n", ui.black_score, ui.white_score);
-            //     SDL_Delay(2000);
-            //     running = 0;
-            // }
         }
         SDL_Delay(10);
     }
