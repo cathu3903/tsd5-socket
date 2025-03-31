@@ -1,4 +1,3 @@
-/* Gomoku 客户端 */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
