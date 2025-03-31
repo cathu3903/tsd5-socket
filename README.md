@@ -11,7 +11,7 @@ This is a Gomoku (five-in-a-row) game implemented in **C** using the **SDL2** gr
 - `commun.h`: Header file containing shared definitions and structures used by both the client and server.
 - `Makefile`: Build script to compile the client and server programs.
 - `README.md`: Project documentation (this file).
-- 
+
 ## Features
 
 - 15x15 game board, supporting Black and White players.
