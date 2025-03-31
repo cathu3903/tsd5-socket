@@ -68,9 +68,9 @@ make
 
 Run the server in one terminal, specifying the port number:
 ```
-./serverur_TCP 12345 ## Uses fixed port 12345
+./serverur_TCP # Uses fixed port 12345
 ```
 Run the client in two separate terminals, ensuring the IP address matches the server:
 ```
-./client_TCP localhost 12345 #onnects to fixed port 12345
+./client_TCP localhost #Connects to fixed port 12345
 ```
