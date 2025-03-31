@@ -74,19 +74,3 @@ Run the client in two separate terminals, ensuring the IP address matches the se
 ```
 ./client_TCP localhost 12345 #onnects to fixed port 12345
 ```
-
-## Version 0.2 计划使用静态图片取代sdl2渲染
-1. 使用AI生成的静态图片取代sdl2渲染的棋盘与棋子 (hr)
-2. 使用老师提供的tictactoe.h替代原本代码中的对应结构，并修改注释为英文(yn) 
-
-## Version 0.2.2 结束游戏后玩家可以投票是否重新开始，并对每局游戏赢家计分，在投票重新开始界面可以看到两个玩家的分数
-1. 使用循环结构
-2. 增加投票环节
-3. 增加计分变量并显示
-
-## Version 1.0 最终程
-1. 解决了初始回合玩家显示问题
-2. 解决了socket粘包导致的投票环节不生效的问题
-3. 解决了socket粘包导致的服务器无法处理棋子位置的问题
-4. 删除了调试的move_from/move_to功能
-该版本可以提交
